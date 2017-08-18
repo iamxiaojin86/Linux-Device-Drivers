@@ -9,8 +9,12 @@ else
   DEBFLAGS = -O2
 endif
 
-CFLAGS += $(DEBFLAGS)
-CFLAGS += -I$(LDDINC)
+#CFLAGS += $(DEBFLAGS)
+#CFLAGS += -I$(LDDINC)
+
+
+ccflags-y += $(DEBFLAGS)
+ccflags-y += -I$(LDDINC)
 
 ifneq ($(KERNELRELEASE),)
 # call from kernel build system
