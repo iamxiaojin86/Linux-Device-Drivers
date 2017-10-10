@@ -393,8 +393,7 @@ ssize_t scull_write(struct file *filp, const char __user *buf, size_t count,
  * The ioctl() implementation
  */
 
-int scull_ioctl(struct inode *inode, struct file *filp,
-                 unsigned int cmd, unsigned long arg)
+int scull_ioctl(struct inode *inode, unsigned int cmd, unsigned long arg)
 {
 
 	int err = 0, tmp;
