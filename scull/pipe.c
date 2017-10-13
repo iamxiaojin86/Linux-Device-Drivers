@@ -365,7 +365,7 @@ int scull_p_init(dev_t firstdev)
 		init_waitqueue_head(&(scull_p_devices[i].inq));
 		init_waitqueue_head(&(scull_p_devices[i].outq));
 //		init_MUTEX(&scull_p_devices[i].sem);
-		mutex_init(&scull_p_devices[i].sem);
+		sema_init(&scull_p_devices[i].sem, 1);
 		scull_p_setup_cdev(scull_p_devices + i, i);
 	}
 #ifdef SCULL_DEBUG
