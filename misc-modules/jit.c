@@ -15,7 +15,6 @@
  * $Id: jit.c,v 1.16 2004/09/26 07:02:43 gregkh Exp $
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -27,6 +26,9 @@
 #include <linux/types.h>
 #include <linux/spinlock.h>
 #include <linux/interrupt.h>
+#include <linux/sched.h>
+#include <linux/slab.h>
+#include <linux/seq_file.h>
 
 #include <asm/hardirq.h>
 /*
@@ -43,7 +45,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 /* use these as data pointers, to implement four files in one function */
 enum jit_files {
-	JIT_BUSY,
+	JIT_BUSY = 11,
 	JIT_SCHED,
 	JIT_QUEUE,
 	JIT_SCHEDTO
@@ -53,8 +55,8 @@ enum jit_files {
  * This function prints one line of data, after sleeping one second.
  * It can sleep in different ways, according to the data pointer
  */
-int jit_fn(char *buf, char **start, off_t offset,
-	      int len, int *eof, void *data)
+
+int jit_fn(struct seq_file *filp, void *data)
 {
 	unsigned long j0, j1; /* jiffies */
 	wait_queue_head_t wait;
@@ -63,7 +65,7 @@ int jit_fn(char *buf, char **start, off_t offset,
 	j0 = jiffies;
 	j1 = j0 + delay;
 
-	switch((long)data) {
+	switch((long)filp->private) {
 		case JIT_BUSY:
 			while (time_before(jiffies, j1))
 				cpu_relax();
@@ -73,7 +75,6 @@ int jit_fn(char *buf, char **start, off_t offset,
 				schedule();
 			}
 			break;
-		case JIT_QUEUE:
 			wait_event_interruptible_timeout(wait, 0, delay);
 			break;
 		case JIT_SCHEDTO:
@@ -83,10 +84,23 @@ int jit_fn(char *buf, char **start, off_t offset,
 	}
 	j1 = jiffies; /* actual value after we delayed */
 
-	len = sprintf(buf, "%9li %9li\n", j0, j1);
-	*start = buf;
-	return len;
+	seq_printf(filp, "data type:%d %9li %9li\n",(long)filp->private, j0, j1);
+	return 0;
 }
+
+
+int jit_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp,jit_fn, PDE_DATA(inode));
+}
+
+static struct file_operations jit_ops = {
+	.owner = THIS_MODULE,
+	.open = jit_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release
+};
 
 /*
  * This file, on the other hand, returns the current time forever
@@ -262,15 +276,16 @@ int jit_tasklet(char *buf, char **start, off_t offset,
 
 int __init jit_init(void)
 {
-	create_proc_read_entry("currentime", 0, NULL, jit_currentime, NULL);
-	create_proc_read_entry("jitbusy", 0, NULL, jit_fn, (void *)JIT_BUSY);
-	create_proc_read_entry("jitsched",0, NULL, jit_fn, (void *)JIT_SCHED);
-	create_proc_read_entry("jitqueue",0, NULL, jit_fn, (void *)JIT_QUEUE);
-	create_proc_read_entry("jitschedto", 0, NULL, jit_fn, (void *)JIT_SCHEDTO);
+//	create_proc_read_entry("currentime", 0, NULL, jit_currentime, NULL);
+//	create_proc_read_entry("jitbusy", 0, NULL, jit_fn, (void *)JIT_BUSY);
+	proc_create_data("jitbusy", 0, NULL, &jit_ops, (void *)JIT_BUSY);
+//	create_proc_read_entry("jitsched",0, NULL, jit_fn, (void *)JIT_SCHED);
+//	create_proc_read_entry("jitqueue",0, NULL, jit_fn, (void *)JIT_QUEUE);
+//	create_proc_read_entry("jitschedto", 0, NULL, jit_fn, (void *)JIT_SCHEDTO);
 
-	create_proc_read_entry("jitimer", 0, NULL, jit_timer, NULL);
-	create_proc_read_entry("jitasklet", 0, NULL, jit_tasklet, NULL);
-	create_proc_read_entry("jitasklethi", 0, NULL, jit_tasklet, (void *)1);
+//	create_proc_read_entry("jitimer", 0, NULL, jit_timer, NULL);
+//	create_proc_read_entry("jitasklet", 0, NULL, jit_tasklet, NULL);
+//	create_proc_read_entry("jitasklethi", 0, NULL, jit_tasklet, (void *)1);
 
 	return 0; /* success */
 }
