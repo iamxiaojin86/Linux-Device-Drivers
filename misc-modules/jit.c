@@ -145,7 +145,6 @@ struct jit_data {
 	int hi; /* tasklet or tasklet_hi */
 	wait_queue_head_t wait;
 	unsigned long prevjiffies;
-	unsigned char *buf;
 	int loops;
 
 	struct seq_file *filp;
@@ -224,7 +223,7 @@ void jit_tasklet_fn(unsigned long arg)
 {
 	struct jit_data *data = (struct jit_data *)arg;
 	unsigned long j = jiffies;
-	data->buf += sprintf(data->buf, "%9li  %3li     %i    %6i   %i   %s\n",
+	seq_printf(data->filp, "%9li  %3li     %i    %6i   %i   %s\n",
 			     j, j - data->prevjiffies, in_interrupt() ? 1 : 0,
 			     current->pid, smp_processor_id(), current->comm);
 
@@ -240,13 +239,11 @@ void jit_tasklet_fn(unsigned long arg)
 }
 
 /* the /proc function: allocate everything to allow concurrency */
-int jit_tasklet(char *buf, char **start, off_t offset,
-	      int len, int *eof, void *arg)
+int jit_tasklet(struct seq_file *filp, void *d)
 {
 	struct jit_data *data;
-	char *buf2 = buf;
 	unsigned long j = jiffies;
-	long hi = (long)arg;
+	long hi = (long)filp->private;
 
 	data = kmalloc(sizeof(*data), GFP_KERNEL);
 	if (!data)
@@ -255,16 +252,16 @@ int jit_tasklet(char *buf, char **start, off_t offset,
 	init_waitqueue_head (&data->wait);
 
 	/* write the first lines in the buffer */
-	buf2 += sprintf(buf2, "   time   delta  inirq    pid   cpu command\n");
-	buf2 += sprintf(buf2, "%9li  %3li     %i    %6i   %i   %s\n",
+	seq_printf(filp, "   time   delta  inirq    pid   cpu command\n");
+	seq_printf(filp, "%9li  %3li     %i    %6i   %i   %s\n",
 			j, 0L, in_interrupt() ? 1 : 0,
 			current->pid, smp_processor_id(), current->comm);
 
 	/* fill the data for our tasklet function */
 	data->prevjiffies = j;
-	data->buf = buf2;
 	data->loops = JIT_ASYNC_LOOPS;
-	
+	data->filp = filp;
+
 	/* register the tasklet */
 	tasklet_init(&data->tlet, jit_tasklet_fn, (unsigned long)data);
 	data->hi = hi;
@@ -278,13 +275,23 @@ int jit_tasklet(char *buf, char **start, off_t offset,
 
 	if (signal_pending(current))
 		return -ERESTARTSYS;
-	buf2 = data->buf;
 	kfree(data);
-	*eof = 1;
-	return buf2 - buf;
+	return 0;
 }
 
 
+int jitasklet_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp,jit_tasklet, PDE_DATA(inode));
+}
+
+static struct file_operations jit_tasklet_ops = {
+	.owner = THIS_MODULE,
+	.open = jitasklet_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release
+};
 
 int __init jit_init(void)
 {
@@ -295,8 +302,8 @@ int __init jit_init(void)
 	proc_create_data("jitschedto", 0, NULL, &jit_ops, (void *)JIT_SCHEDTO);
 
 	proc_create("jitimer", 0, NULL, &jit_timer_ops);
-//	create_proc_read_entry("jitasklet", 0, NULL, jit_tasklet, NULL);
-//	create_proc_read_entry("jitasklethi", 0, NULL, jit_tasklet, (void *)1);
+	proc_create_data("jitasklet", 0, NULL, &jit_tasklet_ops, (void *)0);
+	proc_create_data("jitasklethi", 0, NULL, &jit_tasklet_ops, (void *)1);
 
 	return 0; /* success */
 }
