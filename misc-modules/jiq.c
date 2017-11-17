@@ -15,7 +15,6 @@
  * $Id: jiq.c,v 1.7 2004/09/26 07:02:43 gregkh Exp $
  */
  
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -28,6 +27,7 @@
 #include <linux/workqueue.h>
 #include <linux/preempt.h>
 #include <linux/interrupt.h> /* tasklets */
+#include <linux/seq_file.h>
 
 MODULE_LICENSE("Dual BSD/GPL");
 
@@ -53,17 +53,15 @@ module_param(delay, long, 0);
 static DECLARE_WAIT_QUEUE_HEAD (jiq_wait);
 
 
-static struct work_struct jiq_work;
-
-
-
 /*
  * Keep track of info we need between task queue runs.
  */
 static struct clientdata {
+	struct work_struct jiq_work;
+	struct seq_file *seq_f;
 	int len;
-	char *buf;
 	unsigned long jiffies;
+	unsigned char *buf;
 	long delay;
 } jiq_data;
 
@@ -82,27 +80,25 @@ static int jiq_print(void *ptr)
 {
 	struct clientdata *data = ptr;
 	int len = data->len;
-	char *buf = data->buf;
 	unsigned long j = jiffies;
+	struct seq_file *filp = data->seq_f;
 
-	if (len > LIMIT) { 
+	if (filp->count > LIMIT) { 
 		wake_up_interruptible(&jiq_wait);
 		return 0;
 	}
 
-	if (len == 0)
-		len = sprintf(buf,"    time  delta preempt   pid cpu command\n");
+	if (filp->count == 0)
+		seq_printf(data->seq_f,"    time  delta preempt   pid cpu command\n");
 	else
 		len =0;
 
   	/* intr_count is only exported since 1.3.5, but 1.99.4 is needed anyways */
-	len += sprintf(buf+len, "%9li  %4li     %3i %5i %3i %s\n",
+	seq_printf(data->seq_f, "%9li  %4li     %3i %5i %3i %s %d\n",
 			j, j - data->jiffies,
 			preempt_count(), current->pid, smp_processor_id(),
-			current->comm);
+			current->comm, filp->count);
 
-	data->len += len;
-	data->buf += len;
 	data->jiffies = j;
 	return 1;
 }
@@ -118,34 +114,45 @@ static void jiq_print_wq(void *ptr)
 	if (! jiq_print (ptr))
 		return;
     
-	if (data->delay)
-		schedule_delayed_work(&jiq_work, data->delay);
-	else
-		schedule_work(&jiq_work);
+//	if (data->delay)
+//		schedule_delayed_work(&(data->jiq_work), data->delay);
+//	else
+		schedule_work(&(data->jiq_work));
 }
 
 
 
-static int jiq_read_wq(char *buf, char **start, off_t offset,
-                   int len, int *eof, void *data)
+static int jiq_read_wq(struct seq_file* seq, void *data)
 {
 	DEFINE_WAIT(wait);
 	
 	jiq_data.len = 0;                /* nothing printed, yet */
-	jiq_data.buf = buf;              /* print in this place */
 	jiq_data.jiffies = jiffies;      /* initial time */
 	jiq_data.delay = 0;
+	jiq_data.seq_f = seq;
     
 	prepare_to_wait(&jiq_wait, &wait, TASK_INTERRUPTIBLE);
-	schedule_work(&jiq_work);
+	schedule_work(&(jiq_data.jiq_work));
 	schedule();
 	finish_wait(&jiq_wait, &wait);
 
-	*eof = 1;
-	return jiq_data.len;
+	return 0;
 }
 
+static int jiq_read_wq_open(struct inode* inode, struct file *filp)
+{
+	return single_open(filp, jiq_read_wq, NULL);
+}
 
+static struct file_operations jiq_read_wq_fops = {
+	.open = jiq_read_wq_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+
+#if 0
 static int jiq_read_wq_delayed(char *buf, char **start, off_t offset,
                    int len, int *eof, void *data)
 {
@@ -230,7 +237,7 @@ static int jiq_read_run_timer(char *buf, char **start, off_t offset,
 	*eof = 1;
 	return jiq_data.len;
 }
-
+#endif
 
 
 /*
@@ -241,12 +248,13 @@ static int jiq_init(void)
 {
 
 	/* this line is in jiq_init() */
-	INIT_WORK(&jiq_work, jiq_print_wq, &jiq_data);
+	INIT_WORK(&(jiq_data.jiq_work), jiq_print_wq);
 
-	create_proc_read_entry("jiqwq", 0, NULL, jiq_read_wq, NULL);
-	create_proc_read_entry("jiqwqdelay", 0, NULL, jiq_read_wq_delayed, NULL);
-	create_proc_read_entry("jitimer", 0, NULL, jiq_read_run_timer, NULL);
-	create_proc_read_entry("jiqtasklet", 0, NULL, jiq_read_tasklet, NULL);
+//	create_proc_read_entry("jiqwq", 0, NULL, jiq_read_wq, NULL);
+	proc_create("jiqwq", 0, NULL, &jiq_read_wq_fops);
+//	create_proc_read_entry("jiqwqdelay", 0, NULL, jiq_read_wq_delayed, NULL);
+//	create_proc_read_entry("jitimer", 0, NULL, jiq_read_run_timer, NULL);
+//	create_proc_read_entry("jiqtasklet", 0, NULL, jiq_read_tasklet, NULL);
 
 	return 0; /* succeed */
 }
