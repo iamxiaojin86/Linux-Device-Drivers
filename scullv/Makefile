@@ -1,21 +1,21 @@
 
 # Comment/uncomment the following line to enable/disable debugging
-#DEBUG = y
+DEBUG = y
 
 
 ifeq ($(DEBUG),y)
-  DEBFLAGS = -O -g -DSCULLV_DEBUG # "-O" is needed to expand inlines
+  DEBFLAGS = -O -g -DSCULLV_USE_PROC # "-O" is needed to expand inlines
 else
   DEBFLAGS = -O2
 endif
 
-CFLAGS += $(DEBFLAGS) -I$(LDDINC)
+ccflags-y += $(DEBFLAGS) -I$(LDDINC)
 
 TARGET = scullv
 
 ifneq ($(KERNELRELEASE),)
 
-scullv-objs := main.o mmap.o
+scullv-objs := main.o #mmap.o
 
 obj-m	:= scullv.o
 

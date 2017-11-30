@@ -15,7 +15,6 @@
  * $Id: _main.c.in,v 1.21 2004/10/14 20:11:39 corbet Exp $
  */
 
-#include <linux/config.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -29,6 +28,7 @@
 #include <linux/aio.h>
 #include <asm/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/seq_file.h>
 #include "scullv.h"		/* local definitions */
 
 
@@ -59,61 +59,54 @@ void scullv_cleanup(void);
  * The proc filesystem: function to read and entry
  */
 
-void scullv_proc_offset(char *buf, char **start, off_t *offset, int *len)
-{
-	if (*offset == 0)
-		return;
-	if (*offset >= *len) {
-		/* Not there yet */
-		*offset -= *len;
-		*len = 0;
-	} else {
-		/* We're into the interesting stuff now */
-		*start = buf + *offset;
-		*offset = 0;
-	}
-}
-
 /* FIXME: Do we need this here??  It be ugly  */
-int scullv_read_procmem(char *buf, char **start, off_t offset,
-                   int count, int *eof, void *data)
+int scullv_read_procmem(struct seq_file* seq_f, void *data)
 {
-	int i, j, order, qset, len = 0;
-	int limit = count - 80; /* Don't print more than this */
+	int i, j, order, qset;
+	int limit = seq_f->size - 80; /* Don't print more than this */
 	struct scullv_dev *d;
 
-	*start = buf;
 	for(i = 0; i < scullv_devs; i++) {
 		d = &scullv_devices[i];
 		if (down_interruptible (&d->sem))
 			return -ERESTARTSYS;
 		qset = d->qset;  /* retrieve the features of each device */
 		order = d->order;
-		len += sprintf(buf+len,"\nDevice %i: qset %i, order %i, sz %li\n",
+		seq_printf(seq_f,"\nDevice %i: qset %i, order %i, sz %li\n",
 				i, qset, order, (long)(d->size));
 		for (; d; d = d->next) { /* scan the list */
-			len += sprintf(buf+len,"  item at %p, qset at %p\n",d,d->data);
-			scullv_proc_offset (buf, start, &offset, &len);
-			if (len > limit)
+			seq_printf(seq_f,"  item at %p, qset at %p\n",d,d->data);
+			if (seq_f->count > limit)
 				goto out;
 			if (d->data && !d->next) /* dump only the last item - save space */
+			{
 				for (j = 0; j < qset; j++) {
 					if (d->data[j])
-						len += sprintf(buf+len,"    % 4i:%8p\n",j,d->data[j]);
-					scullv_proc_offset (buf, start, &offset, &len);
-					if (len > limit)
+						seq_printf(seq_f,"    % 4i:%8p\n",j,d->data[j]);
+					if (seq_f->count > limit)
 						goto out;
 				}
+			}
 		}
 	  out:
 		up (&scullv_devices[i].sem);
-		if (len > limit)
+		if (seq_f->count > limit)
 			break;
 	}
-	*eof = 1;
-	return len;
+	return 0;
 }
 
+static int scullv_read_open(struct inode* node, struct file* filp)
+{
+	return single_open(filp, scullv_read_procmem, NULL);
+}
+
+static struct file_operations scullv_read_fops = {
+	.open = scullv_read_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
 #endif /* SCULLV_USE_PROC */
 
 /*
@@ -271,7 +264,7 @@ ssize_t scullv_write (struct file *filp, const char __user *buf, size_t count,
  * The ioctl() implementation
  */
 
-int scullv_ioctl (struct inode *inode, struct file *filp,
+long scullv_ioctl (struct file *filp,
                  unsigned int cmd, unsigned long arg)
 {
 
@@ -392,7 +385,7 @@ loff_t scullv_llseek (struct file *filp, loff_t off, int whence)
 	return newpos;
 }
 
-
+#if 0
 /*
  * A simple asynchronous I/O implementation.
  */
@@ -453,7 +446,7 @@ static ssize_t scullv_aio_write(struct kiocb *iocb, const char __user *buf,
 {
 	return scullv_defer_op(1, iocb, (char __user *) buf, count, pos);
 }
-
+#endif
 
  
 /*
@@ -471,12 +464,12 @@ struct file_operations scullv_fops = {
 	.llseek =    scullv_llseek,
 	.read =	     scullv_read,
 	.write =     scullv_write,
-	.ioctl =     scullv_ioctl,
-	.mmap =	     scullv_mmap,
+	.unlocked_ioctl =     scullv_ioctl,
+//	.mmap =	     scullv_mmap,
 	.open =	     scullv_open,
 	.release =   scullv_release,
-	.aio_read =  scullv_aio_read,
-	.aio_write = scullv_aio_write,
+//	.aio_read =  scullv_aio_read,
+//	.aio_write = scullv_aio_write,
 };
 
 int scullv_trim(struct scullv_dev *dev)
@@ -565,7 +558,7 @@ int scullv_init(void)
 
 
 #ifdef SCULLV_USE_PROC /* only when available */
-	create_proc_read_entry("scullvmem", 0, NULL, scullv_read_procmem, NULL);
+	proc_create("scullvmem", 0, NULL, &scullv_read_fops);
 #endif
 	return 0; /* succeed */
 
