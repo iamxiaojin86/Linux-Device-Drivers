@@ -29,8 +29,8 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/io.h>
 
-#include <asm/io.h> /* linux-specific */
 
 #ifdef __GLIBC__
 #  include <sys/perm.h>
