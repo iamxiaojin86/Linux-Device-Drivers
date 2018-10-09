@@ -29,7 +29,7 @@ else
              silly.o faulty.o kdatasize.o kdataalign.o
 
 	obj-m := hello.o hellop.o faulty.o complete.o sleepy.o jit.o jiq.o \
-		silly.o
+		silly.o kdataalign.o
 endif
 
 
